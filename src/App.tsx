@@ -936,7 +936,7 @@ export default function App() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `HitungDuit_RM_${new Date().toISOString().substring(0, 10)}.csv`);
+    link.setAttribute('download', `KeuanganGaib_RM_${new Date().toISOString().substring(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1024,12 +1024,12 @@ export default function App() {
               <div className="w-24 h-24 mx-auto mb-4 overflow-hidden rounded-2xl shadow-lg border-2 border-blue-500/30 bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-center">
                 <img 
                   src={loginLogo} 
-                  alt="Hitung Duit Logo" 
+                  alt="KEUANGAN GAIB Logo" 
                   className="w-full h-full object-cover scale-110 rounded-2xl"
                   referrerPolicy="no-referrer"
                 />
               </div>
-              <h2 className="text-2xl font-extrabold tracking-tight">Hitung Duit</h2>
+              <h2 className="text-2xl font-extrabold tracking-tight">KEUANGAN GAIB</h2>
               <p className="text-slate-400 text-sm mt-1">Sistem Pengurusan Wang Ringgit Malaysia (RM)</p>
             </div>
 
