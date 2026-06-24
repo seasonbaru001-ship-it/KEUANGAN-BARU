@@ -1,6 +1,6 @@
 import { Asset, Category, Pilar, Budget, Transaction, User } from './types';
 
-// Helper to format currency in Malaysian Ringgit
+// Helper to format currency in Malaysian Ringgit (MYR)
 export function formatMYR(n: number): string {
   return new Intl.NumberFormat('en-MY', {
     style: 'currency',

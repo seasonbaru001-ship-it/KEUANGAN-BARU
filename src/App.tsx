@@ -47,8 +47,8 @@ export default function App() {
   
   // UI States
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loginUsername, setLoginUsername] = useState('admin');
-  const [loginPassword, setLoginPassword] = useState('@RuangPerpus');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   
   const [isBalanceHidden, setIsBalanceHidden] = useState(false);
@@ -186,14 +186,20 @@ export default function App() {
     e.preventDefault();
     const found = users.find(u => u.username.toLowerCase() === loginUsername.toLowerCase());
     
-    // Simple custom password check just like original GAS script (mock authentication bypass)
-    if (found && (loginPassword === '@RuangPerpus' || loginPassword === found.username)) {
+    // Check custom password if set, otherwise fallback to default credentials
+    const isPasswordCorrect = found && (
+      found.password 
+        ? loginPassword === found.password 
+        : (loginPassword === '@RuangPerpus' || loginPassword === found.username)
+    );
+
+    if (found && isPasswordCorrect) {
       setLoginError('');
       setCurrentUser(found);
       sessionStorage.setItem('logged_user', JSON.stringify(found));
       triggerToast(`Selamat kembali, ${found.fullname}!`);
     } else {
-      setLoginError('Kredonari login tidak sah (Username/Kata Laluan salah).');
+      setLoginError('Kredensial login tidak sah (Username / Kata Sandi salah).');
     }
   };
 
@@ -416,7 +422,7 @@ export default function App() {
 
   // Open Quick Add Modal
   const openAddTransaction = () => {
-    const defaultAsset = assets[0]?.name || '';
+    const defaultAsset = filteredAssets[0]?.name || assets[0]?.name || '';
     setTxAsset(defaultAsset);
     setTxType('Pengeluaran');
     setTxAmountStr('');
@@ -433,13 +439,13 @@ export default function App() {
   const handleTxTypeChange = (type: 'Pemasukan' | 'Pengeluaran' | 'Transfer') => {
     setTxType(type);
     if (type === 'Transfer') {
-      const pocketList = assets.filter(a => a.category === 'Dompet');
+      const pocketList = filteredAssets.filter(a => a.category === 'Dompet');
       // Set Source (txAsset) & Destination (txCategory)
       setTxAsset(pocketList[0]?.name || '');
       setTxCategory(pocketList[1]?.name || pocketList[0]?.name || '');
     } else {
       const list = categories.filter(c => c.type === type);
-      setTxAsset(assets[0]?.name || '');
+      setTxAsset(filteredAssets[0]?.name || assets[0]?.name || '');
       setTxCategory(list[0]?.name || 'Lain-lain');
     }
   };
@@ -483,6 +489,10 @@ export default function App() {
   // Save transaction actual execution
   const executeTransactionSaving = (parsedAmount: number) => {
     if (!currentUser) return;
+    if (isCurrentlyLocked) {
+      triggerToast('Akaun anda telah dikunci oleh Admin. Anda tidak dibenarkan untuk merekodkan sebarang transaksi.');
+      return;
+    }
     // New transaction instantiation
     const newTx: Transaction = {
       id: 'tx-' + Date.now(),
@@ -660,7 +670,8 @@ export default function App() {
         username: userInputUsername.toLowerCase().trim(),
         fullname: userInputFullname.trim(),
         role: userInputRole,
-        email: userInputEmail.trim()
+        email: userInputEmail.trim(),
+        password: userInputPassword.trim() || undefined
       };
       const updated = [...users, newUser];
       setUsers(updated);
@@ -672,7 +683,13 @@ export default function App() {
       const targetUser = settingsModal.data as User;
       const updated = users.map(u => {
         if (u.username === targetUser.username) {
-          return { ...u, fullname: userInputFullname, role: userInputRole, email: userInputEmail };
+          return { 
+            ...u, 
+            fullname: userInputFullname.trim(), 
+            role: userInputRole, 
+            email: userInputEmail.trim(),
+            password: userInputPassword.trim() || u.password
+          };
         }
         return u;
       });
@@ -682,6 +699,10 @@ export default function App() {
     }
 
     else if (mType === 'add_category') {
+      if (currentUser?.role !== 'Admin') {
+        triggerToast('Hanya Admin dibenarkan untuk menambah kategori.');
+        return;
+      }
       const type = settingsModal.data as 'Pemasukan' | 'Pengeluaran';
       if (!catInputName) return;
       const newCat: Category = {
@@ -696,6 +717,10 @@ export default function App() {
     }
 
     else if (mType === 'edit_category') {
+      if (currentUser?.role !== 'Admin') {
+        triggerToast('Hanya Admin dibenarkan untuk mengedit kategori.');
+        return;
+      }
       const oldCat = settingsModal.data as Category;
       if (!catInputName) return;
       const updated = categories.map(c => {
@@ -710,6 +735,10 @@ export default function App() {
     }
 
     else if (mType === 'add_pilar') {
+      if (currentUser?.role !== 'Admin') {
+        triggerToast('Hanya Admin dibenarkan untuk menambah pilar.');
+        return;
+      }
       const type = settingsModal.data as 'Pemasukan' | 'Pengeluaran';
       if (!pilarInputName) return;
       const newPilar: Pilar = {
@@ -854,6 +883,10 @@ export default function App() {
   };
 
   const handleDeleteCategory = (cat: Category) => {
+    if (currentUser?.role !== 'Admin') {
+      triggerToast('Hanya Admin dibenarkan untuk memadam kategori.');
+      return;
+    }
     setConfirmModal({
       title: 'Padam Kategori',
       message: `Padam kategori "${cat.name}" (${cat.type})?`,
@@ -910,10 +943,18 @@ export default function App() {
   };
 
   const handleDeleteBudget = (b: Budget) => {
+    if (isCurrentlyLocked) {
+      triggerToast('Akaun anda telah dikunci oleh Admin. Anda tidak dibenarkan untuk memadam sasaran belanjawan (had belanja).');
+      return;
+    }
     setConfirmModal({
       title: 'Padam Sasaran',
       message: `Padam sasaran limit "${b.category}"?`,
       onConfirm: () => {
+        if (isCurrentlyLocked) {
+          triggerToast('Akaun anda telah dikunci oleh Admin.');
+          return;
+        }
         const updated = budgets.filter(item => !(item.month === b.month && item.category === b.category && item.type === b.type));
         setBudgets(updated);
         LocalDB.saveBudgets(updated);
@@ -1013,7 +1054,7 @@ export default function App() {
           <div className="bg-slate-950 px-6 py-3 flex justify-between items-center text-xs opacity-70">
             <span>9:41 AM</span>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
               <span>Online ID-MYR</span>
             </div>
           </div>
@@ -1068,9 +1109,9 @@ export default function App() {
 
               <button 
                 type="submit" 
-                className="w-full py-3.5 mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 active:scale-[0.98] transition-all text-white font-semibold text-sm rounded-xl shadow-lg shadow-blue-600/10"
+                className="w-full py-3.5 mt-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 active:scale-[0.98] transition-all text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-600/10 tracking-widest uppercase"
               >
-                Log Masuk Sistem
+                LOG IN
               </button>
             </form>
 
@@ -1192,20 +1233,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Locked Notice Banner */}
-          {isCurrentlyLocked && (
-            <div className="mt-3.5 p-3 bg-rose-500/10 dark:bg-rose-950/30 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl flex items-center gap-2.5 text-xs font-sans animate-fadeIn">
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
-              </span>
-              <div className="flex-1">
-                <div className="font-extrabold uppercase text-[9px] tracking-wider mb-0.5">Akaun Anda Dikunci:</div>
-                <div className="text-slate-500 dark:text-slate-350 leading-relaxed font-bold">Semua butang & interaksi dibekukan oleh Admin. Sesi ini adalah untuk paparan sahaja (Read-Only).</div>
-              </div>
-              <Lock className="w-5 h-5 opacity-80" />
-            </div>
-          )}
+          {/* Locked Notice Banner removed per request */}
         </header>
 
         {/* SCROLLABLE INTERMEDIATE AREA */}
@@ -1305,16 +1333,16 @@ export default function App() {
                     const dayLabel = d.toLocaleDateString('ms-MY', { day: 'numeric', month: 'short' });
 
                     // Sum transactions for day
-                    const dayIncoming = transactions
+                    const dayIncoming = displayTransactions
                       .filter(t => t.date.substring(0, 10) === dateStr && t.type === 'Pemasukan')
                       .reduce((sum, t) => sum + t.amount, 0);
 
-                    const dayOutgoing = transactions
+                    const dayOutgoing = displayTransactions
                       .filter(t => t.date.substring(0, 10) === dateStr && t.type === 'Pengeluaran')
                       .reduce((sum, t) => sum + t.amount, 0);
 
                     // Normalize height metrics
-                    const maxScale = Math.max(...transactions.map(t => t.amount), 50);
+                    const maxScale = Math.max(...displayTransactions.map(t => t.amount), 50);
                     const incomingHeight = Math.min((dayIncoming / maxScale) * 100, 100);
                     const outgoingHeight = Math.min((dayOutgoing / maxScale) * 100, 100);
 
@@ -1359,7 +1387,7 @@ export default function App() {
                 </div>
 
                 <div className="space-y-3">
-                  {transactions.slice(0, 5).map((t, idx) => {
+                  {displayTransactions.slice(0, 5).map((t, idx) => {
                     const isIncome = t.type === 'Pemasukan';
                     return (
                       <div 
@@ -1407,12 +1435,14 @@ export default function App() {
                     <TrendingUp className="w-4 h-4 text-emerald-500" />
                     <h3 className="font-bold text-slate-800 dark:text-slate-100 text-xs uppercase tracking-widest">Sasaran & Had Belanja</h3>
                   </div>
-                  <button 
-                    onClick={() => setSettingsModal({ type: 'add_budget', data: { type: 'Pengeluaran' } })}
-                    className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold rounded-full transition-all"
-                  >
-                    + Tetap Sasaran
-                  </button>
+                  {!isCurrentlyLocked && (
+                    <button 
+                      onClick={() => setSettingsModal({ type: 'add_budget', data: { type: 'Pengeluaran' } })}
+                      className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/15 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-bold rounded-full transition-all"
+                    >
+                      + Tetap Sasaran
+                    </button>
+                  )}
                 </div>
 
                 {budgets.length === 0 ? (
@@ -1429,31 +1459,33 @@ export default function App() {
                       return (
                         <div key={idx} className="bg-white dark:bg-slate-950 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm relative group overflow-hidden">
                           {/* Edit / Delete small top buttons */}
-                          <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              onClick={() => {
-                                setBudgetInputCat(b.category);
-                                setBudgetInputLimit(String(b.limit));
-                                if (b.dateRange.includes('_')) {
-                                  const parts = b.dateRange.split('_');
-                                  setBudgetInputStart(parts[0]);
-                                  setBudgetInputEnd(parts[1]);
-                                }
-                                setBudgetInputIgnoreDate(b.note.startsWith('[ALL]'));
-                                setBudgetInputNote(b.note.startsWith('[ALL]') ? b.note.replace('[ALL]', '').trim() : b.note);
-                                setSettingsModal({ type: 'edit_budget', data: { type: b.type, budget: b } });
-                              }}
-                              className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center"
-                            >
-                              <Edit3 className="w-3 h-3" />
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteBudget(b)}
-                              className="w-6 h-6 rounded bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
+                          {!isCurrentlyLocked && (
+                            <div className="absolute top-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button 
+                                onClick={() => {
+                                  setBudgetInputCat(b.category);
+                                  setBudgetInputLimit(String(b.limit));
+                                  if (b.dateRange.includes('_')) {
+                                    const parts = b.dateRange.split('_');
+                                    setBudgetInputStart(parts[0]);
+                                    setBudgetInputEnd(parts[1]);
+                                  }
+                                  setBudgetInputIgnoreDate(b.note.startsWith('[ALL]'));
+                                  setBudgetInputNote(b.note.startsWith('[ALL]') ? b.note.replace('[ALL]', '').trim() : b.note);
+                                  setSettingsModal({ type: 'edit_budget', data: { type: b.type, budget: b } });
+                                }}
+                                className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteBudget(b)}
+                                className="w-6 h-6 rounded bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
 
                           <div className="pr-12">
                             <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full inline-block mb-2 ${
@@ -1556,26 +1588,30 @@ export default function App() {
                           {isBalanceHidden ? 'RM •••••' : formatMYR(a.value)}
                         </b>
                         <div className="flex items-center gap-1.5">
-                          <button 
-                            onClick={() => {
-                              setAssetInputName(a.name);
-                              setAssetInputNoRek(a.no_rek);
-                              setAssetInputVal(new Intl.NumberFormat('en-MY').format(a.value));
-                              setAssetInputOwner(a.owner || 'admin');
-                              setSettingsModal({ type: 'edit_asset', data: a });
-                            }}
-                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all font-bold"
-                            title="Kemaskini"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteAsset(a.name)}
-                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 transition-all"
-                            title="Padam"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {currentUser?.role === 'Admin' && (
+                            <>
+                              <button 
+                                onClick={() => {
+                                  setAssetInputName(a.name);
+                                  setAssetInputNoRek(a.no_rek);
+                                  setAssetInputVal(new Intl.NumberFormat('en-MY').format(a.value));
+                                  setAssetInputOwner(a.owner || 'admin');
+                                  setSettingsModal({ type: 'edit_asset', data: a });
+                                }}
+                                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all font-bold"
+                                title="Kemaskini"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteAsset(a.name)}
+                                className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 transition-all"
+                                title="Padam"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1638,7 +1674,7 @@ export default function App() {
                       className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-xl p-2.5 focus:outline-none focus:border-blue-500 text-slate-700 dark:text-slate-200"
                     >
                       <option value="Semua">Semua Dompet</option>
-                      {assets.filter(a => a.category === 'Dompet').map((w, idx) => (
+                      {filteredAssets.filter(a => a.category === 'Dompet').map((w, idx) => (
                         <option key={idx} value={w.name}>{w.name}</option>
                       ))}
                     </select>
@@ -1648,17 +1684,17 @@ export default function App() {
 
               {/* FLOW CARD */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-emerald-500/10 border border-emerald-500/15 rounded-2xl p-4">
-                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-extrabold uppercase tracking-widest">MASUK ALiran</span>
-                  <h3 className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
+                <div className="bg-emerald-500/10 border border-emerald-500/15 rounded-2xl p-3.5 sm:p-4">
+                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-extrabold uppercase tracking-widest block">MASUK ALiran</span>
+                  <h3 className="text-sm sm:text-base md:text-lg font-black text-emerald-600 dark:text-emerald-400 mt-1 break-words leading-tight">
                     {formatMYR(reportStats.totalIncome)}
                   </h3>
                   <span className="text-[10px] text-slate-400 font-medium block mt-1">{reportStats.incomeCount} kali rekod</span>
                 </div>
 
-                <div className="bg-rose-500/10 border border-rose-500/15 rounded-2xl p-4">
-                  <span className="text-[9px] text-rose-600 dark:text-rose-400 font-extrabold uppercase tracking-widest">BELANJA KELUAR</span>
-                  <h3 className="text-xl font-extrabold text-rose-600 dark:text-rose-400 mt-1">
+                <div className="bg-rose-500/10 border border-rose-500/15 rounded-2xl p-3.5 sm:p-4">
+                  <span className="text-[9px] text-rose-600 dark:text-rose-400 font-extrabold uppercase tracking-widest block">BELANJA KELUAR</span>
+                  <h3 className="text-sm sm:text-base md:text-lg font-black text-rose-600 dark:text-rose-400 mt-1 break-words leading-tight">
                     {formatMYR(reportStats.totalExpense)}
                   </h3>
                   <span className="text-[10px] text-slate-400 font-medium block mt-1">{reportStats.expenseCount} kali rekod</span>
@@ -1880,7 +1916,7 @@ export default function App() {
                     className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-xl p-2.5 text-slate-700 dark:text-slate-200"
                   >
                     <option value="Semua">Semua Dompet</option>
-                    {assets.filter(a => a.category === 'Dompet').map((w, idx) => (
+                    {filteredAssets.filter(a => a.category === 'Dompet').map((w, idx) => (
                       <option key={idx} value={w.name}>{w.name}</option>
                     ))}
                   </select>
@@ -1939,13 +1975,15 @@ export default function App() {
                               {isInc ? '+' : '-'}{formatMYR(t.amount)}
                             </span>
                           </div>
-                          <button 
-                            onClick={() => handleDeleteTx(t.id)}
-                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 opacity-0 group-hover:opacity-100 transition-all"
-                            title="Padam"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {!isCurrentlyLocked && (
+                            <button 
+                              onClick={() => handleDeleteTx(t.id)}
+                              className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 opacity-0 group-hover:opacity-100 transition-all font-bold"
+                              title="Padam"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -2044,6 +2082,7 @@ export default function App() {
                               setUserInputUsername(u.username);
                               setUserInputEmail(u.email);
                               setUserInputRole(u.role);
+                              setUserInputPassword(u.password || '');
                               setSettingsModal({ type: 'edit_user', data: u });
                             }}
                             className="p-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
@@ -2069,37 +2108,62 @@ export default function App() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center px-1">
                   <span className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[10px]">Pilar & Kategori Belanja</span>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => {
-                        setPilarInputName('');
-                        setSettingsModal({ type: 'add_pilar', data: 'Pengeluaran' });
-                      }}
-                      className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-bold rounded-lg"
-                    >
-                      + Pilar
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setCatInputName('');
-                        setCatInputPilar(pilars.filter(p => p.type === 'Pengeluaran')[0]?.name || '');
-                        setSettingsModal({ type: 'add_category', data: 'Pengeluaran' });
-                      }}
-                      className="px-2.5 py-1 bg-blue-600/10 hover:bg-blue-600/15 border border-blue-600/20 text-blue-600 dark:text-sky-400 text-[10px] font-bold rounded-lg"
-                    >
-                      + Kategori
-                    </button>
-                  </div>
                 </div>
 
                 <div className="bg-white dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm p-4 space-y-4">
                   {['Pemasukan', 'Pengeluaran'].map((txType, index) => {
                     const typeCats = categories.filter(c => c.type === txType);
+                    const typePilars = pilars.filter(p => p.type === txType);
                     return (
                       <div key={index} className="space-y-2">
-                        <h4 className={`font-black uppercase tracking-wider border-b pb-1.5 ${
-                          txType === 'Pemasukan' ? 'text-emerald-500' : 'text-rose-500'
-                        }`}>{txType === 'Pemasukan' ? 'Pemasukan (Inflow)' : 'Pengeluaran (Outflow)'}</h4>
+                        <div className="flex justify-between items-center border-b pb-1.5">
+                          <h4 className={`font-black uppercase tracking-wider ${
+                            txType === 'Pemasukan' ? 'text-emerald-500' : 'text-rose-500'
+                          }`}>{txType === 'Pemasukan' ? 'Pemasukan (Inflow)' : 'Pengeluaran (Outflow)'}</h4>
+                          {currentUser?.role === 'Admin' && (
+                            <div className="flex gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setPilarInputName('');
+                                  setSettingsModal({ type: 'add_pilar', data: txType });
+                                }}
+                                className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px] font-bold rounded"
+                              >
+                                + Pilar
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCatInputName('');
+                                  setCatInputPilar(pilars.filter(p => p.type === txType)[0]?.name || '');
+                                  setSettingsModal({ type: 'add_category', data: txType });
+                                }}
+                                className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 text-blue-600 dark:text-sky-450 text-[9px] font-bold rounded"
+                              >
+                                + Kategori
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Senarai Pilar Pentadbiran (Pillars) - Minimalist Inline Pills */}
+                        {typePilars.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pb-1 pt-0.5">
+                            {typePilars.map((p, pIdx) => (
+                              <div key={pIdx} className="flex items-center gap-1 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-850 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                <span>{p.name}</span>
+                                {currentUser?.role === 'Admin' && (
+                                  <button
+                                    onClick={() => handleDeletePilar(p)}
+                                    className="text-rose-500 hover:text-rose-700 font-extrabold text-[10px] leading-none ml-1 p-0.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded transition-colors"
+                                    title="Padam Pilar"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
 
                         {typeCats.length === 0 ? (
                           <span className="text-slate-400 block text-center py-2">Tiada kategori</span>
@@ -2113,24 +2177,26 @@ export default function App() {
                                     <span className="text-[9px] block text-slate-400 font-bold uppercase tracking-wider mt-0.5">Pilar: {c.pilar}</span>
                                   )}
                                 </div>
-                                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                                  <button 
-                                    onClick={() => {
-                                      setCatInputName(c.name);
-                                      setCatInputPilar(c.pilar || '');
-                                      setSettingsModal({ type: 'edit_category', data: c });
-                                    }}
-                                    className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button 
-                                    onClick={() => handleDeleteCategory(c)}
-                                    className="p-1 rounded bg-rose-50 hover:bg-rose-105 text-rose-600"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
+                                {currentUser?.role === 'Admin' && (
+                                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                                    <button 
+                                      onClick={() => {
+                                        setCatInputName(c.name);
+                                        setCatInputPilar(c.pilar || '');
+                                        setSettingsModal({ type: 'edit_category', data: c });
+                                      }}
+                                      className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteCategory(c)}
+                                      className="p-1 rounded bg-rose-50 hover:bg-rose-105 text-rose-600"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -2267,7 +2333,7 @@ export default function App() {
                       onChange={(e) => setTxAsset(e.target.value)}
                       className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl font-bold focus:outline-none text-slate-800 dark:text-white"
                     >
-                      {assets.filter(a => a.category === 'Dompet').map((w, idx) => (
+                      {filteredAssets.filter(a => a.category === 'Dompet').map((w, idx) => (
                         <option key={idx} value={w.name}>{w.name}</option>
                       ))}
                     </select>
@@ -2283,7 +2349,7 @@ export default function App() {
                       className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl font-bold focus:outline-none text-slate-800 dark:text-white"
                     >
                       {txType === 'Transfer' ? (
-                        assets.filter(a => a.category === 'Dompet').map((w, idx) => (
+                        filteredAssets.filter(a => a.category === 'Dompet').map((w, idx) => (
                           <option key={idx} value={w.name}>{w.name}</option>
                         ))
                       ) : (
@@ -2420,6 +2486,20 @@ export default function App() {
                         <option value="User">Standard User Only</option>
                         <option value="Admin">System Administrator</option>
                       </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[9px] font-extrabold text-slate-400 uppercase tracking-wider mb-1">
+                        Kata Sandi Login {settingsModal.type === 'edit_user' ? '(Biarkan kosong jika tidak diubah)' : ''}
+                      </label>
+                      <input 
+                        type="password"
+                        value={userInputPassword}
+                        onChange={(e) => setUserInputPassword(e.target.value)}
+                        placeholder={settingsModal.type === 'edit_user' ? "Masukkan kata sandi baru" : "Contoh: rahasia123"}
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-250 dark:border-slate-800 p-2.5 rounded-xl font-bold"
+                        required={settingsModal.type === 'add_user'}
+                      />
                     </div>
                   </div>
                 )}
